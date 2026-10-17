@@ -1,1 +1,934 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Clash Tracker - Village Upgrade Planner</title>
+  
+  <!-- PWA Metadata -->
+  <meta name="theme-color" content="#0f172a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="manifest.json" />
 
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            clashDark: '#0b1120',
+            clashCard: '#1e293b',
+            clashGold: '#f59e0b',
+            clashElixir: '#ec4899',
+            clashDarkElixir: '#818cf8',
+            clashBuilder: '#22c55e',
+            clashBorder: '#334155'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- FontAwesome Icons & Vue 3 Global CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  
+  <style>
+    /* Custom scrollbar and mobile polish */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: #0b1120; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    body { -webkit-tap-highlight-color: transparent; }
+  </style>
+</head>
+<body class="bg-clashDark text-slate-100 font-sans antialiased min-h-screen select-none pb-24">
+
+<div id="app" class="max-w-xl mx-auto min-h-screen flex flex-col">
+
+  <!-- ================= TOP NAVIGATION BAR ================= -->
+  <header class="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-clashBorder px-4 py-3 shadow-lg">
+    <div class="flex items-center justify-between gap-2">
+      <!-- Village Dropdown & Quick Switcher -->
+      <div class="flex items-center gap-2 flex-1 min-w-0">
+        <i class="fa-solid fa-shield-halved text-clashGold text-xl"></i>
+        <div class="flex-1 min-w-0">
+          <select 
+            v-model="currentVillageIndex" 
+            class="bg-slate-800 text-white font-bold text-sm rounded-lg px-2.5 py-1.5 border border-clashBorder outline-none w-full truncate focus:ring-2 focus:ring-clashGold">
+            <option v-for="(v, idx) in villages" :key="v.id" :value="idx">
+              TH{{ v.townHallLevel }} • {{ v.villageName }} ({{ v.playerTag || 'No Tag' }})
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Header Action Buttons -->
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button @click="showNewVillageModal = true" title="Add Village" class="p-2 bg-slate-800 hover:bg-slate-700 active:scale-95 text-clashGold rounded-lg border border-clashBorder text-sm">
+          <i class="fa-solid fa-plus"></i>
+        </button>
+        <button @click="showImportModal = true" title="Import In-Game JSON" class="px-2.5 py-1.5 bg-clashGold hover:bg-amber-500 text-slate-950 font-black rounded-lg text-xs flex items-center gap-1 shadow-md active:scale-95">
+          <i class="fa-solid fa-file-import"></i> <span>Import</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Active Builders & Research Status Banner -->
+    <div class="grid grid-cols-2 gap-2 mt-3 pt-2 border-t border-slate-800 text-xs font-semibold">
+      <!-- Builders Card -->
+      <div class="bg-slate-800/80 p-2 rounded-lg border border-slate-700/60 flex items-center justify-between">
+        <div class="flex items-center gap-1.5 text-clashBuilder">
+          <i class="fa-solid fa-hammer text-sm"></i>
+          <span>Builders</span>
+        </div>
+        <span class="font-mono bg-slate-900 px-2 py-0.5 rounded text-white border border-slate-700">
+          {{ busyBuildersCount }}/{{ currentVillage.builderCount }} Busy
+        </span>
+      </div>
+
+      <!-- Lab Status Card -->
+      <div class="bg-slate-800/80 p-2 rounded-lg border border-slate-700/60 flex items-center justify-between">
+        <div class="flex items-center gap-1.5 text-clashElixir">
+          <i class="fa-solid fa-flask text-sm"></i>
+          <span>Laboratory</span>
+        </div>
+        <span class="font-mono bg-slate-900 px-2 py-0.5 rounded text-white border border-slate-700">
+          {{ isLabBusy ? 'Busy' : 'Idle' }}
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= MAIN CONTENT TABS ================= -->
+  <main class="flex-1 p-4 space-y-4">
+
+    <!-- 1. ACTIVE TIMERS TAB -->
+    <section v-if="activeTab === 'timers'" class="space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+          <i class="fa-solid fa-clock text-clashGold"></i> Running Upgrades ({{ currentVillage.activeUpgrades.length }})
+        </h2>
+        <button @click="showAddTimerModal = true" class="text-xs bg-slate-800 hover:bg-slate-700 text-clashGold border border-clashBorder font-bold px-2 py-1 rounded flex items-center gap-1">
+          <i class="fa-solid fa-plus"></i> Manual Timer
+        </button>
+      </div>
+
+      <!-- Empty State -->
+      <div v-if="currentVillage.activeUpgrades.length === 0" class="text-center py-12 px-4 bg-clashCard rounded-xl border border-clashBorder border-dashed">
+        <i class="fa-solid fa-hourglass-end text-3xl text-slate-500 mb-2"></i>
+        <h3 class="text-base font-bold text-white">No active upgrades!</h3>
+        <p class="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+          Import your in-game JSON from CoC Settings, or add manual upgrades to track your builders and lab timers.
+        </p>
+        <button @click="showImportModal = true" class="mt-4 px-4 py-2 bg-clashGold hover:bg-amber-500 text-slate-950 font-bold rounded-lg text-xs">
+          Import In-Game JSON
+        </button>
+      </div>
+
+      <!-- Upgrades List -->
+      <div v-else class="space-y-2.5">
+        <div v-for="upg in sortedUpgrades" :key="upg.id" class="bg-clashCard border border-clashBorder rounded-xl p-3 shadow-md relative overflow-hidden">
+          <!-- Background Progress Bar -->
+          <div 
+            class="absolute bottom-0 left-0 top-0 opacity-15 pointer-events-none transition-all duration-1000"
+            :class="upg.type === 'lab' ? 'bg-clashElixir' : 'bg-clashBuilder'"
+            :style="{ width: calcProgress(upg) + '%' }">
+          </div>
+
+          <div class="flex items-start justify-between relative z-10">
+            <div class="flex items-center gap-2.5">
+              <div 
+                class="w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg shadow"
+                :class="upg.type === 'lab' ? 'bg-clashElixir/20 text-clashElixir border border-clashElixir/40' : 'bg-clashBuilder/20 text-clashBuilder border border-clashBuilder/40'">
+                <i :class="upg.type === 'lab' ? 'fa-solid fa-flask' : 'fa-solid fa-hammer'"></i>
+              </div>
+              <div>
+                <div class="flex items-center gap-1.5">
+                  <h4 class="font-bold text-sm text-white">{{ upg.name }}</h4>
+                  <span class="text-[10px] bg-slate-900 border border-slate-700 text-slate-300 font-mono px-1.5 py-0.5 rounded">
+                    Lv.{{ upg.targetLevel }}
+                  </span>
+                </div>
+                <div class="text-[11px] text-slate-400 mt-0.5">
+                  <span>{{ upg.type === 'lab' ? 'Laboratory' : 'Builder' }}</span> • 
+                  <span class="text-slate-300 font-semibold">Ends {{ formatEndDate(upg.endTime) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Time remaining badge -->
+            <div class="text-right">
+              <div class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-slate-900 border"
+                :class="isTimerExpired(upg.endTime) ? 'text-clashBuilder border-clashBuilder/40' : 'text-clashGold border-clashGold/30'">
+                {{ formatRemaining(upg.endTime) }}
+              </div>
+              <button @click="removeUpgrade(upg.id)" class="text-[11px] text-slate-500 hover:text-red-400 mt-1 transition-colors">
+                <i class="fa-solid fa-trash-can"></i> Finish
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. VILLAGE OVERVIEW & STATS TAB -->
+    <section v-if="activeTab === 'overview'" class="space-y-4">
+      <!-- Town Hall & Boosts Card -->
+      <div class="bg-clashCard rounded-xl border border-clashBorder p-4 shadow-md space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 bg-amber-500/20 border border-clashGold/50 rounded-xl flex items-center justify-center font-black text-clashGold text-xl">
+              {{ currentVillage.townHallLevel }}
+            </div>
+            <div>
+              <h3 class="text-base font-extrabold text-white">Town Hall {{ currentVillage.townHallLevel }}</h3>
+              <p class="text-xs text-slate-400">{{ currentVillage.villageName }} • {{ currentVillage.playerTag || 'Untracked Tag' }}</p>
+            </div>
+          </div>
+          <button @click="openVillageSettingsModal" class="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-lg border border-slate-700">
+            <i class="fa-solid fa-gear"></i>
+          </button>
+        </div>
+
+        <!-- Gold Pass Boost Selector -->
+        <div class="grid grid-cols-2 gap-3 pt-3 border-t border-slate-700/70 text-xs">
+          <div>
+            <label class="block text-slate-400 font-semibold mb-1">Builder Boost</label>
+            <select v-model.number="currentVillage.builderBoost" @change="saveToStorage" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-1.5 text-white font-mono focus:border-clashGold">
+              <option :value="0">0% Discount</option>
+              <option :value="10">10% Boost</option>
+              <option :value="15">15% Boost</option>
+              <option :value="20">20% Boost</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-slate-400 font-semibold mb-1">Research Boost</label>
+            <select v-model.number="currentVillage.researchBoost" @change="saveToStorage" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-1.5 text-white font-mono focus:border-clashElixir">
+              <option :value="0">0% Discount</option>
+              <option :value="10">10% Boost</option>
+              <option :value="15">15% Boost</option>
+              <option :value="20">20% Boost</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Walls Progress Card -->
+      <div class="bg-clashCard rounded-xl border border-clashBorder p-4 shadow-md">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <i class="fa-solid fa-cubes-stacked text-clashGold"></i> Walls Inventory
+          </span>
+          <span class="text-xs font-mono font-bold text-white">{{ totalWallsCount }} / 325</span>
+        </div>
+        <div v-if="wallBreakdown.length > 0" class="space-y-1.5 mt-3">
+          <div v-for="w in wallBreakdown" :key="w.lvl" class="flex items-center justify-between text-xs bg-slate-900/60 p-2 rounded border border-slate-800">
+            <span class="text-slate-300 font-medium">Wall Level {{ w.lvl }}</span>
+            <span class="font-mono font-bold text-clashGold">{{ w.cnt }} pieces</span>
+          </div>
+        </div>
+        <p v-else class="text-xs text-slate-500 italic mt-1">Import village JSON to see your exact wall levels breakdown.</p>
+      </div>
+
+      <!-- Exported Entities Summary -->
+      <div class="bg-clashCard rounded-xl border border-clashBorder p-4 shadow-md">
+        <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
+          <i class="fa-solid fa-list-check text-clashDarkElixir"></i> Village Data Summary
+        </h4>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div class="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800 flex justify-between items-center">
+            <span class="text-slate-400">Buildings</span>
+            <span class="font-mono font-bold text-white">{{ currentVillage.rawExportData?.buildings?.length || 0 }}</span>
+          </div>
+          <div class="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800 flex justify-between items-center">
+            <span class="text-slate-400">Traps</span>
+            <span class="font-mono font-bold text-white">{{ currentVillage.rawExportData?.traps?.length || 0 }}</span>
+          </div>
+          <div class="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800 flex justify-between items-center">
+            <span class="text-slate-400">Heroes</span>
+            <span class="font-mono font-bold text-white">{{ currentVillage.rawExportData?.heroes?.length || 0 }}</span>
+          </div>
+          <div class="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800 flex justify-between items-center">
+            <span class="text-slate-400">Troops & Spells</span>
+            <span class="font-mono font-bold text-white">
+              {{ (currentVillage.rawExportData?.units?.length || 0) + (currentVillage.rawExportData?.spells?.length || 0) }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. BACKUP & CLOUD STORAGE SETTINGS TAB -->
+    <section v-if="activeTab === 'settings'" class="space-y-4">
+      <div class="bg-clashCard rounded-xl border border-clashBorder p-4 shadow-md space-y-4">
+        <div>
+          <h3 class="text-sm font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-database text-clashGold"></i> Backup & Data Management
+          </h3>
+          <p class="text-xs text-slate-400 mt-1">
+            All villages are saved automatically in your device's offline LocalStorage. Backup to a file anytime to keep your progress safe forever.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+          <button @click="downloadBackupFile" class="p-2.5 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2">
+            <i class="fa-solid fa-download text-clashGold"></i> Download Backup JSON
+          </button>
+          
+          <label class="p-2.5 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 cursor-pointer">
+            <i class="fa-solid fa-upload text-clashElixir"></i> Restore from File
+            <input type="file" accept=".json" @change="handleRestoreFile" class="hidden" />
+          </label>
+        </div>
+      </div>
+
+      <!-- APK / PWA Information -->
+      <div class="bg-clashCard rounded-xl border border-clashBorder p-4 shadow-md space-y-3">
+        <h3 class="text-sm font-bold text-white flex items-center gap-2">
+          <i class="fa-brands fa-android text-clashBuilder"></i> PWA & Android APK Ready
+        </h3>
+        <p class="text-xs text-slate-400 leading-relaxed">
+          This app is 100% compliant with standard PWA specifications. You can add it to your Home Screen from your mobile browser, or build an Android APK via 
+          <a href="https://www.pwabuilder.com" target="_blank" class="text-clashGold underline">PWABuilder</a>.
+        </p>
+        <button @click="requestNotificationPermission" class="w-full p-2 bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded-lg text-xs font-medium flex items-center justify-center gap-2">
+          <i class="fa-solid fa-bell text-clashGold"></i> Enable Finish Notifications
+        </button>
+      </div>
+
+      <!-- Danger Zone -->
+      <div class="bg-red-950/20 border border-red-900/40 rounded-xl p-4">
+        <h4 class="text-xs font-bold text-red-400 uppercase tracking-wider mb-2">Village Management</h4>
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-slate-400">Delete currently selected village</span>
+          <button 
+            @click="deleteCurrentVillage" 
+            :disabled="villages.length <= 1"
+            class="px-3 py-1.5 bg-red-600/80 hover:bg-red-600 disabled:opacity-30 disabled:cursor-not-allowed text-white text-xs font-bold rounded">
+            Delete Village
+          </button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ================= BOTTOM NAVIGATION BAR ================= -->
+  <nav class="fixed bottom-0 left-0 right-0 max-w-xl mx-auto bg-slate-900/95 backdrop-blur-md border-t border-clashBorder flex items-center justify-around py-2 z-30">
+    <button 
+      @click="activeTab = 'timers'" 
+      class="flex flex-col items-center gap-1 text-xs font-semibold py-1 px-4 transition-colors relative"
+      :class="activeTab === 'timers' ? 'text-clashGold' : 'text-slate-400 hover:text-slate-200'">
+      <i class="fa-solid fa-clock-rotate-left text-lg"></i>
+      <span>Timers</span>
+      <span v-if="currentVillage.activeUpgrades.length > 0" class="absolute top-0 right-2 w-2 h-2 bg-clashGold rounded-full animate-pulse"></span>
+    </button>
+
+    <button 
+      @click="activeTab = 'overview'" 
+      class="flex flex-col items-center gap-1 text-xs font-semibold py-1 px-4 transition-colors"
+      :class="activeTab === 'overview' ? 'text-clashGold' : 'text-slate-400 hover:text-slate-200'">
+      <i class="fa-solid fa-layer-group text-lg"></i>
+      <span>Overview</span>
+    </button>
+
+    <button 
+      @click="activeTab = 'settings'" 
+      class="flex flex-col items-center gap-1 text-xs font-semibold py-1 px-4 transition-colors"
+      :class="activeTab === 'settings' ? 'text-clashGold' : 'text-slate-400 hover:text-slate-200'">
+      <i class="fa-solid fa-gear text-lg"></i>
+      <span>Settings</span>
+    </button>
+  </nav>
+
+  <!-- ================= IN-GAME JSON IMPORTER MODAL ================= -->
+  <div v-if="showImportModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-clashBorder rounded-2xl w-full max-w-lg p-5 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-base font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-file-import text-clashGold"></i> Import Village JSON
+        </h3>
+        <button @click="showImportModal = false" class="text-slate-400 hover:text-white">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <div class="bg-slate-800/80 p-3 rounded-lg text-xs text-slate-300 space-y-1">
+        <p class="font-bold text-white">How to export from Clash of Clans:</p>
+        <p>1. Open Clash of Clans &rarr; <strong>Settings</strong> &rarr; <strong>More Settings</strong>.</p>
+        <p>2. Scroll down and click <strong>"Export Village Data"</strong> (copies JSON to clipboard).</p>
+        <p>3. Paste below or click the auto-paste button.</p>
+      </div>
+
+      <div class="space-y-2">
+        <div class="flex justify-between items-center">
+          <label class="text-xs font-semibold text-slate-400">JSON Payload</label>
+          <button @click="pasteFromClipboard" class="text-xs text-clashGold hover:underline font-semibold flex items-center gap-1">
+            <i class="fa-solid fa-paste"></i> Paste from Clipboard
+          </button>
+        </div>
+        <textarea 
+          v-model="importJsonString" 
+          rows="6" 
+          placeholder='{"tag": "#2PP...", "timestamp": 1729..., "buildings": [...]}' 
+          class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-200 outline-none focus:border-clashGold">
+        </textarea>
+        <p v-if="importError" class="text-xs text-red-400 font-semibold">{{ importError }}</p>
+      </div>
+
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button @click="showImportModal = false" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold">
+          Cancel
+        </button>
+        <button @click="processSupercellJson" class="px-4 py-2 bg-clashGold hover:bg-amber-500 text-slate-950 rounded-lg text-xs font-extrabold shadow-md">
+          Parse & Sync Village
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= ADD MANUAL TIMER MODAL ================= -->
+  <div v-if="showAddTimerModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-clashBorder rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-base font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-plus text-clashGold"></i> Add Manual Upgrade
+        </h3>
+        <button @click="showAddTimerModal = false" class="text-slate-400 hover:text-white">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-400 font-semibold mb-1">Upgrade Type</label>
+          <div class="grid grid-cols-2 gap-2">
+            <button 
+              @click="newTimer.type = 'builder'" 
+              :class="newTimer.type === 'builder' ? 'bg-clashBuilder/20 border-clashBuilder text-clashBuilder' : 'bg-slate-800 border-slate-700 text-slate-400'"
+              class="p-2 border rounded-lg font-bold flex items-center justify-center gap-2">
+              <i class="fa-solid fa-hammer"></i> Builder
+            </button>
+            <button 
+              @click="newTimer.type = 'lab'" 
+              :class="newTimer.type === 'lab' ? 'bg-clashElixir/20 border-clashElixir text-clashElixir' : 'bg-slate-800 border-slate-700 text-slate-400'"
+              class="p-2 border rounded-lg font-bold flex items-center justify-center gap-2">
+              <i class="fa-solid fa-flask"></i> Laboratory
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-slate-400 font-semibold mb-1">Structure / Troop Name</label>
+          <input v-model="newTimer.name" type="text" placeholder="e.g. Archer Tower or Electro Dragon" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:border-clashGold" />
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-slate-400 font-semibold mb-1">Target Level</label>
+            <input v-model.number="newTimer.targetLevel" type="number" min="1" max="100" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:border-clashGold" />
+          </div>
+          <div>
+            <label class="block text-slate-400 font-semibold mb-1">Duration (Hours)</label>
+            <input v-model.number="newTimer.durationHours" type="number" min="0.1" step="0.5" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:border-clashGold" />
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button @click="showAddTimerModal = false" class="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold">Cancel</button>
+        <button @click="submitManualTimer" class="px-4 py-2 bg-clashGold text-slate-950 rounded-lg text-xs font-bold">Start Timer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= NEW VILLAGE MODAL ================= -->
+  <div v-if="showNewVillageModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-clashBorder rounded-2xl w-full max-w-sm p-5 shadow-2xl space-y-4">
+      <h3 class="text-base font-bold text-white flex items-center gap-2">
+        <i class="fa-solid fa-plus text-clashGold"></i> Add New Village Profile
+      </h3>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-400 mb-1">Village Name</label>
+          <input v-model="newVillageName" type="text" placeholder="e.g. War Base or Alt Account" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:border-clashGold" />
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1">Town Hall Level (1 to 17)</label>
+          <input v-model.number="newVillageTH" type="number" min="1" max="17" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:border-clashGold" />
+        </div>
+      </div>
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button @click="showNewVillageModal = false" class="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold">Cancel</button>
+        <button @click="addNewVillage" class="px-4 py-2 bg-clashGold text-slate-950 rounded-lg text-xs font-bold">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= VILLAGE SETTINGS MODAL ================= -->
+  <div v-if="showVillageSettingsModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-clashBorder rounded-2xl w-full max-w-sm p-5 shadow-2xl space-y-4">
+      <h3 class="text-base font-bold text-white flex items-center gap-2">
+        <i class="fa-solid fa-gear text-clashGold"></i> Village Settings
+      </h3>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-400 mb-1">Village Name</label>
+          <input v-model="currentVillage.villageName" @change="saveToStorage" type="text" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:border-clashGold" />
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1">Player Tag</label>
+          <input v-model="currentVillage.playerTag" @change="saveToStorage" type="text" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:border-clashGold" />
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-slate-400 mb-1">Town Hall</label>
+            <input v-model.number="currentVillage.townHallLevel" @change="saveToStorage" type="number" min="1" max="17" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:border-clashGold" />
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1">Builders (1-6)</label>
+            <input v-model.number="currentVillage.builderCount" @change="saveToStorage" type="number" min="1" max="6" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:border-clashGold" />
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button @click="showVillageSettingsModal = false" class="px-4 py-2 bg-clashGold text-slate-950 rounded-lg text-xs font-bold">Done</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ================= APPLICATION LOGIC ================= -->
+<script>
+  const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+
+  // Supercell IDs mapping lookup
+  const DATA_ID_MAP = {
+    1000001: { name: 'Town Hall', type: 'builder' },
+    1000008: { name: 'Cannon', type: 'builder' },
+    1000009: { name: 'Archer Tower', type: 'builder' },
+    1000010: { name: 'Wall', type: 'wall' },
+    1000011: { name: 'Wizard Tower', type: 'builder' },
+    1000013: { name: 'Mortar', type: 'builder' },
+    1000021: { name: 'Air Defense', type: 'builder' },
+    1000023: { name: 'Hidden Tesla', type: 'builder' },
+    1000027: { name: 'X-Bow', type: 'builder' },
+    1000028: { name: 'Inferno Tower', type: 'builder' },
+    1000031: { name: 'Eagle Artillery', type: 'builder' },
+    1000032: { name: 'Scattershot', type: 'builder' },
+    1000033: { name: 'Monolith', type: 'builder' },
+    28000000: { name: 'Barbarian King', type: 'builder' },
+    28000001: { name: 'Archer Queen', type: 'builder' },
+    28000002: { name: 'Grand Warden', type: 'builder' },
+    28000003: { name: 'Royal Champion', type: 'builder' },
+    28000004: { name: 'Minion Prince', type: 'builder' },
+    4000000: { name: 'Barbarian', type: 'lab' },
+    4000001: { name: 'Archer', type: 'lab' },
+    4000002: { name: 'Goblin', type: 'lab' },
+    4000003: { name: 'Giant', type: 'lab' },
+    4000004: { name: 'Wall Breaker', type: 'lab' },
+    4000005: { name: 'Balloon', type: 'lab' },
+    4000006: { name: 'Wizard', type: 'lab' },
+    4000007: { name: 'Healer', type: 'lab' },
+    4000008: { name: 'Dragon', type: 'lab' },
+    4000009: { name: 'P.E.K.K.A', type: 'lab' },
+    4000010: { name: 'Minion', type: 'lab' },
+    4000011: { name: 'Hog Rider', type: 'lab' },
+    4000012: { name: 'Valkyrie', type: 'lab' },
+    4000013: { name: 'Golem', type: 'lab' },
+    4000024: { name: 'Electro Dragon', type: 'lab' },
+    4000029: { name: 'Root Rider', type: 'lab' },
+    26000000: { name: 'Lightning Spell', type: 'lab' },
+    26000001: { name: 'Healing Spell', type: 'lab' },
+    26000002: { name: 'Rage Spell', type: 'lab' },
+    26000003: { name: 'Jump Spell', type: 'lab' },
+    26000004: { name: 'Freeze Spell', type: 'lab' }
+  };
+
+  createApp({
+    setup() {
+      const activeTab = ref('timers');
+      const villages = ref([]);
+      const currentVillageIndex = ref(0);
+      const now = ref(Date.now());
+
+      // Modals
+      const showImportModal = ref(false);
+      const showAddTimerModal = ref(false);
+      const showNewVillageModal = ref(false);
+      const showVillageSettingsModal = ref(false);
+
+      // Modal inputs
+      const importJsonString = ref('');
+      const importError = ref('');
+      const newVillageName = ref('');
+      const newVillageTH = ref(16);
+      const newTimer = ref({
+        name: '',
+        targetLevel: 2,
+        durationHours: 24,
+        type: 'builder'
+      });
+
+      // Timer ticker
+      let intervalId = null;
+
+      onMounted(() => {
+        loadFromStorage();
+        intervalId = setInterval(() => {
+          now.value = Date.now();
+        }, 1000);
+        registerServiceWorker();
+      });
+
+      onUnmounted(() => {
+        if (intervalId) clearInterval(intervalId);
+      });
+
+      const currentVillage = computed(() => {
+        if (!villages.value || villages.value.length === 0) {
+          return createDefaultVillage();
+        }
+        return villages.value[currentVillageIndex.value] || villages.value[0];
+      });
+
+      const busyBuildersCount = computed(() => {
+        return currentVillage.value.activeUpgrades.filter(u => u.type === 'builder' && u.endTime > now.value).length;
+      });
+
+      const isLabBusy = computed(() => {
+        return currentVillage.value.activeUpgrades.some(u => u.type === 'lab' && u.endTime > now.value);
+      });
+
+      const sortedUpgrades = computed(() => {
+        return [...currentVillage.value.activeUpgrades].sort((a, b) => a.endTime - b.endTime);
+      });
+
+      const wallBreakdown = computed(() => {
+        const raw = currentVillage.value.rawExportData;
+        if (!raw || !raw.buildings) return [];
+        return raw.buildings.filter(b => b.data === 1000010).sort((a, b) => b.lvl - a.lvl);
+      });
+
+      const totalWallsCount = computed(() => {
+        return wallBreakdown.value.reduce((acc, curr) => acc + (curr.cnt || 1), 0);
+      });
+
+      // Storage Operations
+      function createDefaultVillage(name = 'Main Village', th = 16) {
+        return {
+          id: 'v_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+          villageName: name,
+          playerTag: '#2PP00CLAN',
+          townHallLevel: th,
+          builderCount: 6,
+          builderBoost: 20,
+          researchBoost: 20,
+          rawExportData: null,
+          activeUpgrades: [
+            {
+              id: 'sample_1',
+              name: 'Archer Queen',
+              targetLevel: 95,
+              type: 'builder',
+              startTime: Date.now() - 36000000,
+              endTime: Date.now() + 180000000
+            },
+            {
+              id: 'sample_2',
+              name: 'Root Rider',
+              targetLevel: 3,
+              type: 'lab',
+              startTime: Date.now() - 40000000,
+              endTime: Date.now() + 250000000
+            }
+          ]
+        };
+      }
+
+      function loadFromStorage() {
+        const stored = localStorage.getItem('coc_tracker_villages');
+        if (stored) {
+          try {
+            villages.value = JSON.parse(stored);
+            const savedIdx = localStorage.getItem('coc_tracker_idx');
+            if (savedIdx && villages.value[savedIdx]) {
+              currentVillageIndex.value = parseInt(savedIdx, 10);
+            }
+          } catch (e) {
+            villages.value = [createDefaultVillage()];
+          }
+        } else {
+          villages.value = [createDefaultVillage()];
+        }
+        saveToStorage();
+      }
+
+      function saveToStorage() {
+        localStorage.setItem('coc_tracker_villages', JSON.stringify(villages.value));
+        localStorage.setItem('coc_tracker_idx', currentVillageIndex.value.toString());
+      }
+
+      // JSON Clipboard parser for Clash of Clans in-game export
+      async function pasteFromClipboard() {
+        try {
+          if (navigator.clipboard && navigator.clipboard.readText) {
+            const text = await navigator.clipboard.readText();
+            importJsonString.value = text;
+          } else {
+            alert('Clipboard permission not granted. Please paste manually into the box.');
+          }
+        } catch (err) {
+          alert('Could not access clipboard automatically. Please paste manually.');
+        }
+      }
+
+      function processSupercellJson() {
+        importError.value = '';
+        if (!importJsonString.value.trim()) {
+          importError.value = 'Please paste a valid JSON string.';
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(importJsonString.value);
+          if (!parsed.buildings && !parsed.heroes && !parsed.tag) {
+            importError.value = 'Unrecognized Supercell export format.';
+            return;
+          }
+
+          // Update current village metadata
+          if (parsed.tag) currentVillage.value.playerTag = parsed.tag;
+          currentVillage.value.rawExportData = parsed;
+
+          // Detect Town Hall level if present
+          if (parsed.buildings) {
+            const thObj = parsed.buildings.find(b => b.data === 1000001);
+            if (thObj && thObj.lvl) {
+              currentVillage.value.townHallLevel = thObj.lvl;
+            }
+          }
+
+          // Extract running timers automatically
+          const exportTimestamp = (parsed.timestamp || Math.floor(Date.now() / 1000)) * 1000;
+          const detectedTimers = [];
+
+          const checkCategory = (list, defaultType) => {
+            if (!list || !Array.isArray(list)) return;
+            list.forEach(item => {
+              if (item.timer && item.timer > 0) {
+                const meta = DATA_ID_MAP[item.data] || { name: `ID #${item.data}`, type: defaultType };
+                const remainingMs = item.timer * 1000;
+                detectedTimers.push({
+                  id: 'timer_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+                  name: meta.name,
+                  targetLevel: (item.lvl || 0) + 1,
+                  type: meta.type || defaultType,
+                  startTime: exportTimestamp,
+                  endTime: Date.now() + remainingMs
+                });
+              }
+            });
+          };
+
+          checkCategory(parsed.buildings, 'builder');
+          checkCategory(parsed.heroes, 'builder');
+          checkCategory(parsed.units, 'lab');
+          checkCategory(parsed.spells, 'lab');
+
+          if (detectedTimers.length > 0) {
+            currentVillage.value.activeUpgrades = detectedTimers;
+          }
+
+          saveToStorage();
+          showImportModal.value = false;
+          importJsonString.value = '';
+          alert(`Successfully imported village ${currentVillage.value.playerTag}! Synced ${detectedTimers.length} active upgrade timers.`);
+        } catch (e) {
+          importError.value = 'Failed to parse JSON: ' + e.message;
+        }
+      }
+
+      // Add manual timer
+      function submitManualTimer() {
+        if (!newTimer.value.name.trim()) return;
+        const durationMs = (newTimer.value.durationHours || 1) * 3600 * 1000;
+        
+        // Apply Gold pass boost calculation
+        const discount = newTimer.value.type === 'builder' 
+          ? (currentVillage.value.builderBoost || 0) 
+          : (currentVillage.value.researchBoost || 0);
+
+        const boostedDurationMs = durationMs * ((100 - discount) / 100);
+
+        currentVillage.value.activeUpgrades.push({
+          id: 'manual_' + Date.now(),
+          name: newTimer.value.name.trim(),
+          targetLevel: newTimer.value.targetLevel || 1,
+          type: newTimer.value.type,
+          startTime: Date.now(),
+          endTime: Date.now() + boostedDurationMs
+        });
+
+        saveToStorage();
+        showAddTimerModal.value = false;
+        newTimer.value.name = '';
+      }
+
+      function removeUpgrade(id) {
+        currentVillage.value.activeUpgrades = currentVillage.value.activeUpgrades.filter(u => u.id !== id);
+        saveToStorage();
+      }
+
+      // Format countdown
+      function formatRemaining(endTime) {
+        const diff = endTime - now.value;
+        if (diff <= 0) return 'READY!';
+
+        const totalSecs = Math.floor(diff / 1000);
+        const days = Math.floor(totalSecs / 86400);
+        const hours = Math.floor((totalSecs % 86400) / 3600);
+        const mins = Math.floor((totalSecs % 3600) / 60);
+        const secs = totalSecs % 60;
+
+        if (days > 0) return `${days}d ${hours}h ${mins}m`;
+        if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
+        return `${mins}m ${secs}s`;
+      }
+
+      function formatEndDate(endTime) {
+        const d = new Date(endTime);
+        return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      }
+
+      function isTimerExpired(endTime) {
+        return endTime <= now.value;
+      }
+
+      function calcProgress(upg) {
+        const total = upg.endTime - upg.startTime;
+        if (total <= 0) return 100;
+        const elapsed = now.value - upg.startTime;
+        const pct = Math.min(100, Math.max(0, (elapsed / total) * 100));
+        return pct.toFixed(1);
+      }
+
+      // Villages Switcher Operations
+      function addNewVillage() {
+        if (!newVillageName.value.trim()) return;
+        const newV = createDefaultVillage(newVillageName.value.trim(), newVillageTH.value || 16);
+        villages.value.push(newV);
+        currentVillageIndex.value = villages.value.length - 1;
+        saveToStorage();
+        newVillageName.value = '';
+        showNewVillageModal.value = false;
+      }
+
+      function deleteCurrentVillage() {
+        if (villages.value.length <= 1) return;
+        if (confirm(`Are you sure you want to delete "${currentVillage.value.villageName}"?`)) {
+          villages.value.splice(currentVillageIndex.value, 1);
+          currentVillageIndex.value = 0;
+          saveToStorage();
+        }
+      }
+
+      function openVillageSettingsModal() {
+        showVillageSettingsModal.value = true;
+      }
+
+      // Backup & Restore
+      function downloadBackupFile() {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(villages.value, null, 2));
+        const dlAnchor = document.createElement('a');
+        dlAnchor.setAttribute("href", dataStr);
+        dlAnchor.setAttribute("download", `clash_tracker_backup_${new Date().toISOString().slice(0,10)}.json`);
+        document.body.appendChild(dlAnchor);
+        dlAnchor.click();
+        dlAnchor.remove();
+      }
+
+      function handleRestoreFile(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const restored = JSON.parse(e.target.result);
+            if (Array.isArray(restored) && restored.length > 0) {
+              villages.value = restored;
+              currentVillageIndex.value = 0;
+              saveToStorage();
+              alert('Successfully restored ' + restored.length + ' villages from backup file!');
+            } else {
+              alert('Invalid backup file format.');
+            }
+          } catch (err) {
+            alert('Error parsing backup file: ' + err.message);
+          }
+        };
+        reader.readAsText(file);
+      }
+
+      function requestNotificationPermission() {
+        if ("Notification" in window) {
+          Notification.requestPermission().then(permission => {
+            alert(permission === "granted" ? "Notifications enabled! You'll be alerted when upgrades finish." : "Notifications denied or dismissed.");
+          });
+        } else {
+          alert("Web Notifications are not supported in this browser.");
+        }
+      }
+
+      function registerServiceWorker() {
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.register('./sw.js').catch(() => {
+            // Local dev without server fallback
+          });
+        }
+      }
+
+      return {
+        activeTab,
+        villages,
+        currentVillageIndex,
+        currentVillage,
+        busyBuildersCount,
+        isLabBusy,
+        sortedUpgrades,
+        wallBreakdown,
+        totalWallsCount,
+        showImportModal,
+        showAddTimerModal,
+        showNewVillageModal,
+        showVillageSettingsModal,
+        importJsonString,
+        importError,
+        newVillageName,
+        newVillageTH,
+        newTimer,
+        pasteFromClipboard,
+        processSupercellJson,
+        submitManualTimer,
+        removeUpgrade,
+        formatRemaining,
+        formatEndDate,
+        isTimerExpired,
+        calcProgress,
+        addNewVillage,
+        deleteCurrentVillage,
+        openVillageSettingsModal,
+        saveToStorage,
+        downloadBackupFile,
+        handleRestoreFile,
+        requestNotificationPermission
+      };
+    }
+  }).mount('#app');
+</script>
+</body>
+</html>
